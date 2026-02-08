@@ -1,9 +1,9 @@
-# requirements.txt - Оптимизированные версии для Railway
+# requirements.txt - Совместимые версии
 telethon==1.34.0
-python-telegram-bot==20.3  # Более стабильная версия
+python-telegram-bot==20.3
+httpx==0.24.1  # Совместимая версия с python-telegram-bot
 aiohttp==3.9.3
 aiofiles==23.2.1
-httpx==0.25.2
-Pillow==9.5.0  # Стабильная версия без ошибок
+Pillow==10.3.0  # Обновленная версия
 python-dotenv==1.0.0
 pytz==2024.1
