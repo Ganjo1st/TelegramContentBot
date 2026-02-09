@@ -17,3 +17,4 @@ pydantic==2.5.3
 # Для работы с данными
 Pillow==10.2.0
 python-magic==0.4.27
+waitress==3.0.1
