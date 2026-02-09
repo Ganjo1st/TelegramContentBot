@@ -1,20 +1,21 @@
 # requirements.txt
-# Основные библиотеки
+# Telegram библиотеки
 telethon==1.34.0
-flask==3.0.2
-python-dotenv==1.0.0
+python-telegram-bot==20.7  # <-- ЭТО ОБЯЗАТЕЛЬНО ДОБАВИТЬ!
 
-# Для асинхронных операций
+# Flask и веб-сервер
+flask==3.0.2
+waitress==3.0.1
+
+# Асинхронные библиотеки
 aiohttp==3.9.3
 aiofiles==23.2.1
 nest-asyncio==1.6.0
 
-# Дополнительные
+# Вспомогательные
+python-dotenv==1.0.0
 requests==2.31.0
 pytz==2024.1
 pydantic==2.5.3
-
-# Для работы с данными
 Pillow==10.2.0
 python-magic==0.4.27
-waitress==3.0.1
