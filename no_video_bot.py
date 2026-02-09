@@ -1,4 +1,4 @@
-# no_video_bot.py - Упрощенная версия для Railway
+# no_video_bot.py - С подписью "ЦарьградТВ" в конце каждого поста
 import asyncio
 import os
 import re
@@ -29,20 +29,30 @@ print("=" * 70)
 
 # ===== ФУНКЦИИ ОБРАБОТКИ =====
 
-async def format_text(text):
-    """Форматирование текста для Дзен"""
+async def format_text(text, add_source=True):
+    """Форматирование текста для Дзен с подписью источника"""
     if not text:
-        return ""
+        text = ""
     
     # Удаляем ссылки на Telegram
     text = re.sub(r'https?://t\.me/[^\s]+', '', text)
     text = re.sub(r'@[\w_]+', '', text)
+    
+    # Удаляем эмодзи-флаги и специальные символы
+    text = re.sub(r'[\U0001F1E6-\U0001F1FF]{2}', '', text)  # Флаги
+    text = re.sub(r'[♺⚠️🔴🟢🟡🔵🟣🟠⚫⚪🟤\u200b\u2060]', '', text)  # Спецсимволы
     
     # Заменяем переносы строк
     text = text.replace('\n', '\n\n')
     
     # Удаляем лишние пробелы
     text = re.sub(r'\s+', ' ', text).strip()
+    
+    # Добавляем подпись источника
+    if add_source and text:
+        if not text.endswith(('.', '!', '?')):
+            text += '.'
+        text += f"\n\n📰 Источник: ЦарьградТВ"
     
     return text
 
@@ -55,18 +65,19 @@ async def process_photo_message(client, message):
         photo_path = await message.download_media(file='downloads/')
         
         if photo_path:
-            # Форматируем текст
-            caption = await format_text(message.text or message.message)
+            # Форматируем текст с подписью
+            caption = await format_text(message.text or message.message or "")
             
             # Отправляем в целевой канал
             await client.send_file(
                 TARGET_CHANNEL,
                 photo_path,
-                caption=caption[:1024] if caption else None,
+                caption=caption[:1024] if caption else "📰 Источник: ЦарьградТВ",
                 parse_mode='html'
             )
             
             print(f"✅ Фото отправлено в {TARGET_CHANNEL}")
+            print(f"📝 Подпись добавлена: ЦарьградТВ")
             
             # Удаляем временный файл
             os.remove(photo_path)
@@ -81,8 +92,8 @@ async def process_text_message(client, message):
     try:
         print(f"📝 Найдено текстовое сообщение от {message.date}")
         
-        # Форматируем текст
-        formatted_text = await format_text(message.text or message.message)
+        # Форматируем текст с подписью
+        formatted_text = await format_text(message.text or message.message or "")
         
         if formatted_text:
             # Отправляем в целевой канал
@@ -93,8 +104,14 @@ async def process_text_message(client, message):
             )
             
             print(f"✅ Текст отправлен в {TARGET_CHANNEL}")
+            print(f"📝 Подпись добавлена: ЦарьградТВ")
         else:
-            print("⚠️ Текст пустой после форматирования")
+            # Если текст пустой, отправляем просто подпись
+            await client.send_message(
+                TARGET_CHANNEL,
+                "📰 Источник: ЦарьградТВ"
+            )
+            print(f"✅ Подпись отправлена (оригинальный текст был пустым)")
             
     except Exception as e:
         print(f"❌ Ошибка обработки текста: {e}")
@@ -156,9 +173,9 @@ async def main():
         
         print(f"👂 Ожидание новых сообщений из {SOURCE_CHANNEL}...")
         print(f"📤 Отправка в: {TARGET_CHANNEL}")
+        print("📝 Каждому посту будет добавлена подпись: 📰 Источник: ЦарьградТВ")
         print("=" * 70)
         print("✅ Бот успешно запущен и работает!")
-        print("ℹ️ Логи будут появляться при новых сообщениях")
         print("=" * 70)
         
         # Бесконечный цикл ожидания
