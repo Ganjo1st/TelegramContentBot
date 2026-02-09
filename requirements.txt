@@ -19,3 +19,4 @@ pytz==2024.1
 pydantic==2.5.3
 Pillow==10.2.0
 python-magic==0.4.27
+python-telegram-bot==20.7
