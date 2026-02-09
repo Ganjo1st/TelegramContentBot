@@ -594,3 +594,13 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+# В конце no_video_bot.py добавьте:
+async def main():
+    # Ваш основной код запуска бота
+    await client.start()
+    # ... остальной код
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
