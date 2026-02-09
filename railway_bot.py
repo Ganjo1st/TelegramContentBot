@@ -1,127 +1,87 @@
 # railway_bot.py
 import os
-import asyncio
+import sys
+import time
 import logging
 import threading
-import time
 from flask import Flask, jsonify
-import nest_asyncio
-import sys
-
-# Применяем nest_asyncio для совместимости
-nest_asyncio.apply()
 
 # Настройка логов
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
-# Создаем Flask-приложение
+# Создаем Flask-приложение для healthcheck
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return jsonify({
-        "status": "online", 
-        "service": "TelegramContentBot",
-        "version": "1.0"
-    })
+    return jsonify({"status": "online", "service": "TelegramContentBot"})
 
 @app.route('/health')
 def health():
     return jsonify({"status": "healthy"}), 200
 
-@app.route('/ready')
-def ready():
-    return jsonify({"status": "ready"}), 200
-
 def run_flask():
     """Запуск Flask сервера"""
     try:
-        # Получаем PORT из переменных окружения, преобразуем в int
-        port_str = os.getenv("PORT", "8080")
-        
-        # Проверяем и преобразуем PORT
-        if not port_str.isdigit():
-            logger.error(f"PORT must be a number, got: {port_str}")
+        port = int(os.getenv("PORT", "8080"))
+        if not 0 <= port <= 65535:
             port = 8080
-        else:
-            port = int(port_str)
-            
-            if port < 0 or port > 65535:
-                logger.error(f"PORT must be between 0-65535, got: {port}")
-                port = 8080
-        
         logger.info(f"Starting Flask server on port {port}")
-        
-        # Важно: use_reloader=False для предотвращения двойного запуска
-        app.run(
-            host='0.0.0.0', 
-            port=port, 
-            debug=False, 
-            use_reloader=False,
-            threaded=True
-        )
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
     except Exception as e:
-        logger.error(f"Flask server error: {e}")
+        logger.error(f"Flask error: {e}")
         sys.exit(1)
 
-async def run_telegram_bot():
-    """Запуск Telegram бота"""
+def run_telegram_bot():
+    """Запуск Telegram бота в отдельном потоке"""
     try:
-        # Импортируем ваш основной бот
-        logger.info("Importing Telegram bot...")
+        # Импортируем здесь, чтобы ошибки импорта были видны в логах
+        import asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+        
+        # Импортируем ваш бот
+        logger.info("Importing no_video_bot...")
         from no_video_bot import main
         
-        logger.info("Starting Telegram bot logic...")
-        await main()
+        logger.info("Starting Telegram bot...")
         
-    except ImportError as e:
-        logger.error(f"Import error: {e}")
-        logger.error("Make sure no_video_bot.py is in the same directory")
-        return
-    except Exception as e:
-        logger.error(f"Telegram bot error: {e}")
-        raise
-
-def start_telegram_bot():
-    """Запуск бота в отдельном потоке"""
-    def run_async():
+        # Запускаем бота в цикле событий
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         while True:
             try:
-                loop.run_until_complete(run_telegram_bot())
+                loop.run_until_complete(main())
             except Exception as e:
-                logger.error(f"Bot crashed: {e}. Restarting in 30 seconds...")
+                logger.error(f"Bot error: {e}. Restarting in 30 seconds...")
                 time.sleep(30)
-    
-    # Запускаем в отдельном потоке
-    bot_thread = threading.Thread(target=run_async, daemon=True)
-    bot_thread.start()
-    logger.info("Telegram bot thread started")
-    return bot_thread
+                
+    except ImportError as e:
+        logger.error(f"Cannot import modules: {e}")
+        logger.error("Please check requirements.txt")
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
 
 if __name__ == "__main__":
-    logger.info("=== TelegramContentBot Startup ===")
-    logger.info(f"Python version: {sys.version}")
+    logger.info("=== Starting TelegramContentBot ===")
     
-    # Проверяем наличие обязательных переменных
-    required_vars = ['API_ID', 'API_HASH']
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    # Проверяем переменные окружения
+    required = ['API_ID', 'API_HASH', 'SESSION_NAME', 'SOURCE_CHANNEL', 'TARGET_CHANNEL']
+    missing = [var for var in required if not os.getenv(var)]
     
-    if missing_vars:
-        logger.error(f"Missing required environment variables: {missing_vars}")
-        logger.error("Please set them in Railway Variables")
+    if missing:
+        logger.warning(f"Missing env variables: {missing}")
+        logger.warning("Bot may not work properly")
     
-    # Запускаем Telegram бот в фоне
-    bot_thread = start_telegram_bot()
+    # Запускаем Telegram бот в отдельном потоке
+    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
+    bot_thread.start()
     
-    # Запускаем Flask (блокирующий вызов)
+    # Запускаем Flask (блокирует основной поток)
     run_flask()
