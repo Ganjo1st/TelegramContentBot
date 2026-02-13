@@ -1,4 +1,4 @@
-# no_video_bot.py - Копирует ВСЕ посты, удаляет ссылки, не разбивает на части
+# no_video_bot.py - ИСПРАВЛЕННАЯ ВЕРСИЯ
 import asyncio
 import os
 import re
@@ -6,7 +6,7 @@ import sys
 from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, DocumentAttributeVideo
+from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, DocumentAttributeVideo, DocumentAttributeFilename
 
 print("=" * 70)
 print("🤖 TELEGRAM CONTENT BOT - КОПИРУЕТ ВСЕ ПОСТЫ")
@@ -26,9 +26,7 @@ print(f"📤 Ваш канал: {TARGET_CHANNEL}")
 print("=" * 70)
 
 def remove_link_paragraphs(text):
-    """
-    Удаляет целые абзацы, содержащие ссылки
-    """
+    """Удаляет целые абзацы, содержащие ссылки"""
     if not text:
         return text
     
@@ -48,7 +46,7 @@ def remove_link_paragraphs(text):
             r't\.me/\S+',               # t.me/...
             r'telegram\.me/\S+',        # telegram.me/...
             r'@\w+',                     # @username
-            r'подписывайся',             # слово "подписывайся" (регистр не важен)
+            r'подписывайся',             # слово "подписывайся"
             r'подписаться',               # слово "подписаться"
             r'присоединяйся',             # слово "присоединяйся"
             r'переходи по ссылке',        # фраза "переходи по ссылке"
@@ -57,7 +55,7 @@ def remove_link_paragraphs(text):
         for pattern in link_patterns:
             if re.search(pattern, para, re.IGNORECASE):
                 has_link = True
-                print(f"🔗 Удален абзац со ссылкой: {para[:50]}...")
+                print(f"🔗 Удален абзац со ссылкой")
                 break
         
         # Если абзац не содержит ссылок, оставляем его
@@ -75,7 +73,7 @@ async def clean_text(text):
     # Удаляем абзацы со ссылками
     text = remove_link_paragraphs(text)
     
-    # Дополнительная очистка одиночных ссылок (на всякий случай)
+    # Дополнительная очистка одиночных ссылок
     text = re.sub(r'https?://\S+', '', text)
     text = re.sub(r't\.me/\S+', '', text)
     text = re.sub(r'@\w+', '', text)
@@ -140,7 +138,7 @@ async def process_photo_message(client, message):
                     )
                     print(f"✅ Фото отправлено отдельно")
                     
-                    # Отправляем текст отдельно (Telegram поддерживает до 4096 символов)
+                    # Отправляем текст отдельно
                     await client.send_message(
                         TARGET_CHANNEL,
                         final_text,
@@ -152,9 +150,10 @@ async def process_photo_message(client, message):
                 # Если текст пустой после очистки, отправляем только фото
                 await client.send_file(
                     TARGET_CHANNEL,
-                    photo_path
+                    photo_path,
+                    caption="📰 Источник: ЦарьградТВ"
                 )
-                print(f"✅ Фото отправлено (текст удален)")
+                print(f"✅ Фото с подписью отправлено (текст удален)")
             
             # Удаляем временный файл
             os.remove(photo_path)
@@ -165,40 +164,62 @@ async def process_photo_message(client, message):
         print(f"❌ Ошибка обработки фото: {e}")
 
 async def process_video_message(client, message):
-    """Обработка видео сообщения"""
+    """Обработка видео сообщения - ИСПРАВЛЕНО"""
     try:
         print(f"🎥 Найдено видео сообщение от {message.date}")
         
-        # Получаем информацию о видео
+        # Получаем информацию о видео безопасно
         document = message.media.document
-        video_attributes = [attr for attr in document.attributes if isinstance(attr, DocumentAttributeVideo)]
         
-        if video_attributes:
-            video_info = video_attributes[0]
-            print(f"📊 Видео: {video_info.duration}с")
+        # Пытаемся получить информацию о видео
+        duration = None
+        video_info = "видео"
+        
+        for attr in document.attributes:
+            if isinstance(attr, DocumentAttributeVideo):
+                # В разных версиях Telethon разные названия атрибутов
+                duration = getattr(attr, 'duration', None)
+                if hasattr(attr, 'w') and hasattr(attr, 'h'):
+                    video_info = f"{duration}с, {attr.w}x{attr.h}" if duration else f"{attr.w}x{attr.h}"
+                elif hasattr(attr, 'width') and hasattr(attr, 'height'):
+                    video_info = f"{duration}с, {attr.width}x{attr.height}" if duration else f"{attr.width}x{attr.height}"
+                break
+        
+        print(f"📊 {video_info}")
         
         # Получаем и очищаем текст
         original_text = message.text or message.message or ""
         cleaned_text = await clean_text(original_text)
         
         # Скачиваем видео
-        print(f"⬇️ Скачивание видео...")
+        print(f"⬇️ Скачивание видео... (это может занять время)")
         video_path = await message.download_media(file='downloads/')
         
         if video_path:
-            # Форматируем текст с подписью
+            # Подготавливаем текст
             final_text = await format_with_signature(cleaned_text) if cleaned_text else "📰 Источник: ЦарьградТВ"
             
             # Отправляем видео
-            await client.send_file(
-                TARGET_CHANNEL,
-                video_path,
-                caption=final_text if len(final_text) <= 1024 else None,
-                supports_streaming=True
-            )
-            
-            # Если текст длинный, отправляем отдельно
-            if len(final_text) > 1024:
+            if len(final_text) <= 1024:
+                # Если текст короткий - отправляем с видео
+                await client.send_file(
+                    TARGET_CHANNEL,
+                    video_path,
+                    caption=final_text,
+                    supports_streaming=True,
+                    parse_mode='html'
+                )
+                print(f"✅ Видео с подписью отправлено")
+            else:
+                # Если текст длинный - отправляем видео отдельно
+                await client.send_file(
+                    TARGET_CHANNEL,
+                    video_path,
+                    supports_streaming=True
+                )
+                print(f"✅ Видео отправлено")
+                
+                # И текст отдельно
                 await client.send_message(
                     TARGET_CHANNEL,
                     final_text,
@@ -207,8 +228,6 @@ async def process_video_message(client, message):
                 )
                 print(f"✅ Текст отправлен отдельно ({len(final_text)} символов)")
             
-            print(f"✅ Видео отправлено")
-            
             # Удаляем временный файл
             os.remove(video_path)
         else:
@@ -216,6 +235,8 @@ async def process_video_message(client, message):
             
     except Exception as e:
         print(f"❌ Ошибка обработки видео: {e}")
+        import traceback
+        traceback.print_exc()
 
 async def process_text_message(client, message):
     """Обработка текстового сообщения"""
@@ -260,19 +281,21 @@ async def new_message_handler(event):
                 document = message.media.document
                 is_video = False
                 
+                # Проверяем атрибуты
                 for attr in document.attributes:
                     if isinstance(attr, DocumentAttributeVideo):
                         is_video = True
                         break
                 
+                # Проверяем MIME тип
                 mime_type = getattr(document, 'mime_type', '')
-                if mime_type and mime_type.startswith('video/'):
+                if mime_type and ('video/' in mime_type or 'mp4' in mime_type):
                     is_video = True
                 
                 if is_video:
                     await process_video_message(event.client, message)
                 else:
-                    # Обрабатываем как текст, если есть текст
+                    # Если есть текст, обрабатываем как текст
                     if message.text or message.message:
                         await process_text_message(event.client, message)
                     else:
@@ -288,6 +311,8 @@ async def new_message_handler(event):
             
     except Exception as e:
         print(f"🔥 Ошибка в обработчике: {e}")
+        import traceback
+        traceback.print_exc()
 
 async def main():
     """Основная функция бота"""
