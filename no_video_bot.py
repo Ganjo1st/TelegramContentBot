@@ -1,4 +1,4 @@
-# no_video_bot.py - С видео, длинными постами и подписью ЦарьградТВ
+# no_video_bot.py - Копирует ВСЕ посты, удаляет ссылки, не разбивает на части
 import asyncio
 import os
 import re
@@ -7,10 +7,9 @@ from datetime import datetime
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, DocumentAttributeVideo
-import mimetypes
 
 print("=" * 70)
-print("🤖 TELEGRAM CONTENT BOT - С ВИДЕО И ДЛИННЫМИ ПОСТАМИ")
+print("🤖 TELEGRAM CONTENT BOT - КОПИРУЕТ ВСЕ ПОСТЫ")
 print(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print("=" * 70)
 
@@ -24,65 +23,83 @@ SESSION_STRING = os.getenv('TELEGRAM_SESSION_STRING', '')
 print(f"🔧 Режим: Railway Cloud")
 print(f"📡 Канал-источник: {SOURCE_CHANNEL}")
 print(f"📤 Ваш канал: {TARGET_CHANNEL}")
-print(f"🔐 API ID: {API_ID}")
 print("=" * 70)
 
-# ===== ФУНКЦИИ ОБРАБОТКИ =====
-
-def split_long_text(text, max_length=4096):
-    """Разбивает длинный текст на части для отправки"""
-    if len(text) <= max_length:
-        return [text]
-    
-    parts = []
-    current_part = ""
-    
-    # Разбиваем по предложениям
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    
-    for sentence in sentences:
-        if len(current_part) + len(sentence) + 1 <= max_length:
-            if current_part:
-                current_part += " " + sentence
-            else:
-                current_part = sentence
-        else:
-            if current_part:
-                parts.append(current_part)
-            # Если одно предложение слишком длинное, разбиваем его
-            if len(sentence) > max_length:
-                # Разбиваем длинное предложение на части
-                for i in range(0, len(sentence), max_length):
-                    parts.append(sentence[i:i+max_length])
-            else:
-                current_part = sentence
-    
-    if current_part:
-        parts.append(current_part)
-    
-    return parts
-
-async def format_text(text, add_source=True, is_first_part=True, is_last_part=True):
-    """Форматирование текста с учетом разбивки на части"""
+def remove_link_paragraphs(text):
+    """
+    Удаляет целые абзацы, содержащие ссылки
+    """
     if not text:
-        text = ""
+        return text
     
-    # Удаляем ссылки на Telegram
-    text = re.sub(r'https?://t\.me/[^\s]+', '', text)
-    text = re.sub(r'@[\w_]+', '', text)
+    # Разбиваем на абзацы (по двойному переносу строки)
+    paragraphs = text.split('\n\n')
+    
+    # Фильтруем абзацы, удаляя те, что содержат ссылки
+    filtered_paragraphs = []
+    
+    for para in paragraphs:
+        # Проверяем, содержит ли абзац ссылки
+        has_link = False
+        
+        # Разные паттерны ссылок
+        link_patterns = [
+            r'https?://\S+',           # http:// или https://
+            r't\.me/\S+',               # t.me/...
+            r'telegram\.me/\S+',        # telegram.me/...
+            r'@\w+',                     # @username
+            r'подписывайся',             # слово "подписывайся" (регистр не важен)
+            r'подписаться',               # слово "подписаться"
+            r'присоединяйся',             # слово "присоединяйся"
+            r'переходи по ссылке',        # фраза "переходи по ссылке"
+        ]
+        
+        for pattern in link_patterns:
+            if re.search(pattern, para, re.IGNORECASE):
+                has_link = True
+                print(f"🔗 Удален абзац со ссылкой: {para[:50]}...")
+                break
+        
+        # Если абзац не содержит ссылок, оставляем его
+        if not has_link and para.strip():
+            filtered_paragraphs.append(para)
+    
+    # Собираем обратно
+    return '\n\n'.join(filtered_paragraphs)
+
+async def clean_text(text):
+    """Очистка текста от ссылок и мусора"""
+    if not text:
+        return ""
+    
+    # Удаляем абзацы со ссылками
+    text = remove_link_paragraphs(text)
+    
+    # Дополнительная очистка одиночных ссылок (на всякий случай)
+    text = re.sub(r'https?://\S+', '', text)
+    text = re.sub(r't\.me/\S+', '', text)
+    text = re.sub(r'@\w+', '', text)
+    
+    # Удаляем пустые строки и лишние пробелы
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    text = '\n'.join(lines)
     
     # Удаляем эмодзи-флаги и специальные символы
-    text = re.sub(r'[\U0001F1E6-\U0001F1FF]{2}', '', text)  # Флаги
-    text = re.sub(r'[♺⚠️🔴🟢🟡🔵🟣🟠⚫⚪🟤\u200b\u2060]', '', text)  # Спецсимволы
+    text = re.sub(r'[\U0001F1E6-\U0001F1FF]{2}', '', text)
+    text = re.sub(r'[♺⚠️🔴🟢🟡🔵🟣🟠⚫⚪🟤\u200b\u2060]', '', text)
     
-    # Сохраняем переносы строк
-    text = text.strip()
+    return text.strip()
+
+async def format_with_signature(text):
+    """Добавляет подпись в конец текста"""
+    if not text:
+        return "📰 Источник: ЦарьградТВ"
     
-    # Добавляем подпись только к последней части
-    if add_source and is_last_part and text:
-        if not text.endswith(('.', '!', '?')):
-            text += '.'
-        text += f"\n\n📰 Источник: ЦарьградТВ"
+    # Добавляем подпись
+    if not text.endswith(('.', '!', '?')):
+        text += '.'
+    
+    text += f"\n\n📰 Источник: ЦарьградТВ"
     
     return text
 
@@ -95,51 +112,49 @@ async def process_photo_message(client, message):
         photo_path = await message.download_media(file='downloads/')
         
         if photo_path:
-            # Получаем текст
+            # Получаем и очищаем текст
             original_text = message.text or message.message or ""
+            cleaned_text = await clean_text(original_text)
             
-            # Форматируем текст с подписью
-            caption = await format_text(original_text, add_source=True)
-            
-            # Если текст слишком длинный для caption (1024 символа)
-            if len(caption) > 1024:
-                print(f"⚠️ Текст слишком длинный ({len(caption)} символов). Разбиваем...")
+            if cleaned_text:
+                print(f"📝 Текст после очистки: {len(cleaned_text)} символов")
                 
-                # Отправляем фото с кратким описанием
-                short_caption = caption[:1000] + "...\n\n📰 Источник: ЦарьградТВ"
-                await client.send_file(
-                    TARGET_CHANNEL,
-                    photo_path,
-                    caption=short_caption,
-                    parse_mode='html'
-                )
+                # Форматируем с подписью
+                final_text = await format_with_signature(cleaned_text)
                 
-                # Отправляем полный текст отдельными сообщениями
-                text_parts = split_long_text(original_text)
-                for i, part in enumerate(text_parts):
-                    formatted_part = await format_text(
-                        part, 
-                        add_source=(i == len(text_parts)-1),  # Подпись только к последней части
-                        is_last_part=(i == len(text_parts)-1)
+                # Проверяем длину для caption (макс 1024 символа)
+                if len(final_text) <= 1024:
+                    # Отправляем фото с подписью
+                    await client.send_file(
+                        TARGET_CHANNEL,
+                        photo_path,
+                        caption=final_text,
+                        parse_mode='html'
                     )
-                    if formatted_part.strip():
-                        await client.send_message(
-                            TARGET_CHANNEL,
-                            formatted_part,
-                            parse_mode='html'
-                        )
-                        await asyncio.sleep(0.5)  # Небольшая задержка между сообщениями
-                
-                print(f"✅ Фото + {len(text_parts)} частей текста отправлено")
+                    print(f"✅ Фото с подписью отправлено")
+                else:
+                    # Отправляем фото отдельно
+                    await client.send_file(
+                        TARGET_CHANNEL,
+                        photo_path
+                    )
+                    print(f"✅ Фото отправлено отдельно")
+                    
+                    # Отправляем текст отдельно (Telegram поддерживает до 4096 символов)
+                    await client.send_message(
+                        TARGET_CHANNEL,
+                        final_text,
+                        parse_mode='html',
+                        link_preview=False
+                    )
+                    print(f"✅ Текст отправлен отдельно ({len(final_text)} символов)")
             else:
-                # Отправляем фото с подписью
+                # Если текст пустой после очистки, отправляем только фото
                 await client.send_file(
                     TARGET_CHANNEL,
-                    photo_path,
-                    caption=caption if caption else "📰 Источник: ЦарьградТВ",
-                    parse_mode='html'
+                    photo_path
                 )
-                print(f"✅ Фото с подписью отправлено")
+                print(f"✅ Фото отправлено (текст удален)")
             
             # Удаляем временный файл
             os.remove(photo_path)
@@ -160,59 +175,39 @@ async def process_video_message(client, message):
         
         if video_attributes:
             video_info = video_attributes[0]
-            print(f"📊 Видео: {video_info.duration}с, {video_info.width}x{video_info.height}")
+            print(f"📊 Видео: {video_info.duration}с")
         
-        # Получаем текст
+        # Получаем и очищаем текст
         original_text = message.text or message.message or ""
+        cleaned_text = await clean_text(original_text)
         
-        # Скачиваем видео (в фоне, чтобы не блокировать)
-        print(f"⬇️ Скачивание видео... (это может занять время)")
+        # Скачиваем видео
+        print(f"⬇️ Скачивание видео...")
         video_path = await message.download_media(file='downloads/')
         
         if video_path:
             # Форматируем текст с подписью
-            caption = await format_text(original_text, add_source=True)
+            final_text = await format_with_signature(cleaned_text) if cleaned_text else "📰 Источник: ЦарьградТВ"
             
-            # Для видео ограничение caption тоже 1024 символа
-            if len(caption) > 1024:
-                print(f"⚠️ Текст слишком длинный ({len(caption)} символов). Разбиваем...")
-                
-                # Отправляем видео с кратким описанием
-                short_caption = caption[:1000] + "...\n\n📰 Источник: ЦарьградТВ"
-                await client.send_file(
+            # Отправляем видео
+            await client.send_file(
+                TARGET_CHANNEL,
+                video_path,
+                caption=final_text if len(final_text) <= 1024 else None,
+                supports_streaming=True
+            )
+            
+            # Если текст длинный, отправляем отдельно
+            if len(final_text) > 1024:
+                await client.send_message(
                     TARGET_CHANNEL,
-                    video_path,
-                    caption=short_caption,
-                    parse_mode='html'
-                )
-                
-                # Отправляем полный текст отдельными сообщениями
-                text_parts = split_long_text(original_text)
-                for i, part in enumerate(text_parts):
-                    formatted_part = await format_text(
-                        part,
-                        add_source=(i == len(text_parts)-1),
-                        is_last_part=(i == len(text_parts)-1)
-                    )
-                    if formatted_part.strip():
-                        await client.send_message(
-                            TARGET_CHANNEL,
-                            formatted_part,
-                            parse_mode='html'
-                        )
-                        await asyncio.sleep(0.5)
-                
-                print(f"✅ Видео + {len(text_parts)} частей текста отправлено")
-            else:
-                # Отправляем видео с подписью
-                await client.send_file(
-                    TARGET_CHANNEL,
-                    video_path,
-                    caption=caption if caption else "📰 Источник: ЦарьградТВ",
+                    final_text,
                     parse_mode='html',
-                    supports_streaming=True  # Важно для видео!
+                    link_preview=False
                 )
-                print(f"✅ Видео с подписью отправлено")
+                print(f"✅ Текст отправлен отдельно ({len(final_text)} символов)")
+            
+            print(f"✅ Видео отправлено")
             
             # Удаляем временный файл
             os.remove(video_path)
@@ -227,46 +222,36 @@ async def process_text_message(client, message):
     try:
         print(f"📝 Найдено текстовое сообщение от {message.date}")
         
-        # Получаем текст
+        # Получаем и очищаем текст
         original_text = message.text or message.message or ""
+        cleaned_text = await clean_text(original_text)
         
-        # Разбиваем длинный текст на части
-        text_parts = split_long_text(original_text)
-        
-        if len(text_parts) > 1:
-            print(f"⚠️ Длинный текст ({len(original_text)} символов). Разбиваем на {len(text_parts)} частей")
-        
-        # Отправляем каждую часть
-        for i, part in enumerate(text_parts):
-            # Форматируем текст (подпись только к последней части)
-            formatted_text = await format_text(
-                part,
-                add_source=(i == len(text_parts)-1),
-                is_last_part=(i == len(text_parts)-1)
+        if cleaned_text:
+            # Форматируем с подписью
+            final_text = await format_with_signature(cleaned_text)
+            
+            # Отправляем (Telegram поддерживает до 4096 символов)
+            await client.send_message(
+                TARGET_CHANNEL,
+                final_text,
+                parse_mode='html',
+                link_preview=False
             )
             
-            if formatted_text.strip():
-                await client.send_message(
-                    TARGET_CHANNEL,
-                    formatted_text,
-                    parse_mode='html'
-                )
-                print(f"✅ Часть {i+1}/{len(text_parts)} отправлена")
-                await asyncio.sleep(0.5)  # Задержка между частями
-        
-        print(f"✅ Всего отправлено: {len(text_parts)} частей")
-        print(f"📝 Подпись добавлена: ЦарьградТВ")
+            print(f"✅ Текст отправлен ({len(final_text)} символов)")
+        else:
+            print(f"⚠️ Текст пустой после очистки - пропускаем")
             
     except Exception as e:
         print(f"❌ Ошибка обработки текста: {e}")
 
 async def new_message_handler(event):
-    """Обработчик новых сообщений"""
+    """Обработчик ВСЕХ новых сообщений"""
     try:
         message = event.message
         print(f"🆕 Новое сообщение ID: {message.id} | Дата: {message.date}")
         
-        # Проверяем тип сообщения
+        # Обрабатываем ВСЕ типы сообщений
         if message.media:
             if isinstance(message.media, MessageMediaPhoto):
                 await process_photo_message(event.client, message)
@@ -275,13 +260,11 @@ async def new_message_handler(event):
                 document = message.media.document
                 is_video = False
                 
-                # Проверяем атрибуты документа
                 for attr in document.attributes:
                     if isinstance(attr, DocumentAttributeVideo):
                         is_video = True
                         break
                 
-                # Также проверяем MIME тип
                 mime_type = getattr(document, 'mime_type', '')
                 if mime_type and mime_type.startswith('video/'):
                     is_video = True
@@ -289,9 +272,17 @@ async def new_message_handler(event):
                 if is_video:
                     await process_video_message(event.client, message)
                 else:
-                    print(f"⏭️ Пропускаем документ (не видео): {mime_type}")
+                    # Обрабатываем как текст, если есть текст
+                    if message.text or message.message:
+                        await process_text_message(event.client, message)
+                    else:
+                        print(f"⏭️ Пропускаем документ (не видео): {mime_type}")
             else:
-                print(f"ℹ️ Неизвестный тип медиа: {type(message.media)}")
+                # Другие типы медиа - пробуем обработать как текст
+                if message.text or message.message:
+                    await process_text_message(event.client, message)
+                else:
+                    print(f"ℹ️ Неизвестный тип медиа: {type(message.media)}")
         else:
             await process_text_message(event.client, message)
             
@@ -301,7 +292,6 @@ async def new_message_handler(event):
 async def main():
     """Основная функция бота"""
     print("🚀 Запуск основного цикла бота...")
-    print(f"⏰ Время старта: {datetime.now().strftime('%H:%M:%S')}")
     
     # Создаем папку для загрузок
     os.makedirs('downloads', exist_ok=True)
@@ -322,45 +312,37 @@ async def main():
         me = await client.get_me()
         print(f"✅ Telethon клиент запущен")
         print(f"👤 ID: {me.id}")
-        print(f"📛 Имя: {me.first_name}")
-        if me.username:
-            print(f"🔗 @{me.username}")
         
-        # Регистрируем обработчик
+        # Регистрируем обработчик для ВСЕХ сообщений
         client.add_event_handler(
             new_message_handler,
             events.NewMessage(chats=SOURCE_CHANNEL)
         )
         
-        print(f"👂 Ожидание новых сообщений из {SOURCE_CHANNEL}...")
+        print(f"👂 Ожидание ВСЕХ новых сообщений из {SOURCE_CHANNEL}...")
         print(f"📤 Отправка в: {TARGET_CHANNEL}")
-        print("📝 Длинные посты будут разбиты на части")
-        print("🎥 Видео будут копироваться")
-        print("📰 Подпись: ЦарьградТВ добавляется в конец")
+        print(f"🔗 Удаление абзацев со ссылками: ВКЛЮЧЕНО")
+        print(f"📝 Подпись: 📰 Источник: ЦарьградТВ")
         print("=" * 70)
-        print("✅ Бот успешно запущен и работает!")
+        print("✅ Бот успешно запущен!")
         print("=" * 70)
         
-        # Бесконечный цикл ожидания
+        # Бесконечный цикл
         await client.run_until_disconnected()
         
     except Exception as e:
-        print(f"❌ Ошибка при запуске: {e}")
+        print(f"❌ Ошибка: {e}")
         import traceback
         traceback.print_exc()
-        raise
     finally:
         print("🔌 Завершение работы...")
         await client.disconnect()
 
 if __name__ == "__main__":
     try:
-        # Запуск асинхронной функции
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n🛑 Бот остановлен пользователем")
+        print("\n🛑 Бот остановлен")
     except Exception as e:
         print(f"❌ Критическая ошибка: {e}")
-        import traceback
-        traceback.print_exc()
         sys.exit(1)
